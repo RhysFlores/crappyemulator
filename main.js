@@ -13,6 +13,11 @@ function ext(name) {
   return name.split(".").pop().toLowerCase();
 }
 
+function say(text, isError) {
+  statusEl.textContent = text;
+  statusEl.className = isError ? "error" : "";
+}
+
 function loadScript(src) {
   return new Promise((resolve, reject) => {
     const s = document.createElement("script");
@@ -23,6 +28,19 @@ function loadScript(src) {
   });
 }
 
+// Poll until test() is true. Used for cores that finish starting up on their
+// own schedule, where a fixed delay is a race.
+function waitUntil(test, timeoutMs, message) {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    (function poll() {
+      if (test()) return resolve();
+      if (Date.now() - started > timeoutMs) return reject(new Error(message));
+      setTimeout(poll, 50);
+    })();
+  });
+}
+
 function readBytes(file) {
   return file.arrayBuffer().then(b => new Uint8Array(b));
 }
@@ -30,9 +48,8 @@ function readBytes(file) {
 input.onchange = () => {
   const files = Array.from(input.files);
   if (!files.length) return;
-  start(files).catch(e => {
-    statusEl.textContent = "Error: " + e.message;
-  });
+  say("Loading...");
+  start(files).catch(e => say("Error: " + e.message, true));
 };
 
 async function start(files) {
@@ -46,12 +63,12 @@ async function start(files) {
   if (cue) return startPsxCue(cue, files);
   if (disc) return startPsx(disc);
 
-  statusEl.textContent = "That file type isn't supported. Use .nes, .sfc, .smc, or .cue + .bin.";
+  say("That file type isn't supported. Use .nes, .sfc, .smc, .iso, .img, or .cue + .bin.", true);
 }
 
 function begin(system, name) {
   input.disabled = true;
-  statusEl.textContent = "Playing " + name + ". Refresh the page to load a different game.";
+  say("Playing " + name + ". Refresh the page to load a different game.");
   controlsEl.textContent = controls[system];
 }
 
@@ -62,12 +79,13 @@ async function startNes(file) {
   gameEl.style.height = "480px";
   const browser = new jsnes.Browser({
     container: gameEl,
-    onError: e => { statusEl.textContent = "Error: " + e.message; }
+    onError: e => say("Error: " + e.message, true)
   });
   browser.loadROM(data);
   begin("nes", file.name);
 }
 
+// SnesJs calls these as globals.
 function log(text) {
   console.log(text);
 }
@@ -110,7 +128,7 @@ async function startSnes(file) {
 
   const snes = new Snes();
   if (!snes.loadRom(rom, hiRom)) {
-    statusEl.textContent = "Couldn't load that SNES ROM.";
+    say("Couldn't load that SNES ROM.", true);
     return;
   }
   snes.reset(true);
@@ -121,6 +139,9 @@ async function startSnes(file) {
   gameEl.appendChild(canvas);
   const ctx = canvas.getContext("2d");
   const img = ctx.getImageData(0, 0, 512, 480);
+  // The PPU only sets alpha on lines it draws; without this the letterbox
+  // and the unused top lines stay transparent.
+  for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
 
   const actx = new AudioContext();
   const perFrame = Math.floor(actx.sampleRate / 60);
@@ -143,7 +164,12 @@ async function startSnes(file) {
     }
   };
   node.connect(actx.destination);
-  actx.resume();
+  // Browsers start the context suspended until the page has been interacted
+  // with, so keep trying until one of those interactions lands.
+  const resume = () => actx.resume();
+  resume();
+  window.addEventListener("keydown", resume);
+  window.addEventListener("pointerdown", resume);
 
   const keys = {
     z: 0, a: 1, shift: 2, enter: 3,
@@ -170,17 +196,22 @@ async function startSnes(file) {
   function frame(now) {
     acc += Math.min(now - last, 100);
     last = now;
-    while (acc >= 1000 / 60) {
-      snes.runFrame(false);
-      snes.setSamples(bufL, bufR, perFrame);
-      for (let i = 0; i < perFrame; i++) {
-        ringL[writePos & 8191] = bufL[i];
-        ringR[writePos & 8191] = bufR[i];
-        writePos++;
+    try {
+      while (acc >= 1000 / 60) {
+        snes.runFrame(false);
+        snes.setSamples(bufL, bufR, perFrame);
+        for (let i = 0; i < perFrame; i++) {
+          ringL[writePos & 8191] = bufL[i];
+          ringR[writePos & 8191] = bufR[i];
+          writePos++;
+        }
+        acc -= 1000 / 60;
       }
-      acc -= 1000 / 60;
+      snes.setPixels(img.data);
+    } catch (e) {
+      say("The SNES core crashed: " + e.message, true);
+      return;
     }
-    snes.setPixels(img.data);
     ctx.putImageData(img, 0, 0);
     requestAnimationFrame(frame);
   }
@@ -192,12 +223,12 @@ async function startPsxCue(cue, files) {
   const text = await cue.text();
   const names = [...text.matchAll(/FILE\s+"?([^"\r\n]+?)"?\s+BINARY/gi)].map(m => m[1].split(/[\\/]/).pop());
   if (!names.length) {
-    statusEl.textContent = "Couldn't read that .cue file.";
+    say("Couldn't read that .cue file.", true);
     return;
   }
   const bin = files.find(f => f.name.toLowerCase() === names[0].toLowerCase());
   if (!bin) {
-    statusEl.textContent = "Also select " + names[0] + " together with the .cue file.";
+    say("Also select " + names[0] + " together with the .cue file.", true);
     return;
   }
   return startPsx(bin);
@@ -206,8 +237,15 @@ async function startPsxCue(cue, files) {
 async function startPsx(file) {
   const player = document.createElement("wasmpsx-player");
   gameEl.appendChild(player);
+  say("Starting the PS1 core...");
   await loadScript("wasmpsx.min.js");
-  await new Promise(r => setTimeout(r, 500));
+  // wasmpsx finishes wiring up readFile and its worker only after the wasm
+  // module has compiled, which takes longer than any fixed delay is safe for.
+  await waitUntil(
+    () => typeof player.readFile === "function" && typeof pcsx_worker !== "undefined" && pcsx_worker,
+    60000,
+    "The PS1 core didn't finish starting. Try reloading the page."
+  );
   player.readFile(file);
   begin("psx", file.name);
 }

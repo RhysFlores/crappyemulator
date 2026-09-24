@@ -1,14 +1,59 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>crappyemulator</title>
+<style>
+  body { background: #111; color: #ddd; font: 14px/1.5 system-ui, sans-serif;
+         margin: 0 auto; padding: 24px 16px; max-width: 720px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 14px; margin: 22px 0 4px; color: #fff; }
+  a { color: #6cf; }
+  ul { margin: 4px 0; padding-left: 20px; }
+  li { margin: 3px 0; }
+  code { color: #9d9; }
+  .muted { color: #888; }
+  #status { min-height: 1.5em; }
+  #status.error { color: #f77; }
+  #controls { color: #aaa; }
+  #game canvas { background: #000; display: block; max-width: 100%; }
+</style>
 </head>
 <body>
-<p>Choose your game. For PS1, select the .cue and .bin files together.</p>
+
+<h1>crappyemulator</h1>
+<p class="muted">Runs entirely in your browser. Nothing is uploaded anywhere.</p>
+
 <p><input type="file" id="files" multiple></p>
-<p id="status"></p>
+<p id="status">Pick a game file. For PS1, select the <code>.cue</code> and <code>.bin</code> together.</p>
 <p id="controls"></p>
 <div id="game"></div>
+
+<h2>What it emulates</h2>
+<ul>
+  <li><b>NES / Famicom</b> &mdash; <code>.nes</code> (iNES and NES 2.0 headers).
+      Picture, sound, and the Zapper via mouse.
+      Mappers 0, 1, 2, 3, 4, 5, 7, 9, 11, 34, 38, 66, 71, 79, 94, 118, 119, 140, 180, 240, 241.</li>
+  <li><b>SNES / Super Famicom</b> &mdash; <code>.sfc</code>, <code>.smc</code>.
+      65816 CPU, PPU background modes 0&ndash;7, and SPC700 + DSP sound.
+      LoROM and HiROM carts with SRAM; copier headers are stripped automatically.
+      <span class="muted">No enhancement chips &mdash; Super FX, SA-1, DSP-1, S-DD1, SPC7110
+      and CX4 games will not run. No DSP echo effect.</span></li>
+  <li><b>PlayStation (PS1)</b> &mdash; <code>.cue</code> + <code>.bin</code>, or a single
+      <code>.iso</code> / <code>.img</code>. No BIOS file needed.
+      <span class="muted">Much heavier than the other two; give it a few seconds to boot.</span></li>
+</ul>
+<p class="muted">One player, keyboard only. No save states, no save files, no fast-forward,
+no gamepads. Refresh the page to load a different game. Bring your own game files.</p>
+
+<h2>Built on</h2>
+<ul class="muted">
+  <li>NES: <a href="https://github.com/bfirsh/jsnes">jsnes</a> (Apache-2.0)</li>
+  <li>SNES: <a href="https://github.com/angelo-wf/SnesJs">SnesJs</a> (MIT)</li>
+  <li>PS1: <a href="https://github.com/js-emulators/wasmpsx">wasmpsx</a> (MIT)</li>
+</ul>
+
 <script src="main.js"></script>
 </body>
 </html>
